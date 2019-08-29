@@ -136,15 +136,19 @@ def test_partseg(model, loader, catdict, num_classes = 50,forpointnet2=False):
 
     return metrics, hist_acc, cat_iou
 
-def test_semseg(model, loader, catdict, num_classes = 13, pointnet2=False):
+def test_semseg(model, loader, catdict, num_classes, pointnet2=False):
     iou_tabel = np.zeros((len(catdict),3))
     metrics = defaultdict(lambda:list())
     hist_acc = []
-    for batch_id, (points, target) in tqdm(enumerate(loader), total=len(loader), smoothing=0.9):
+    #for batch_id, (points, target) in tqdm(enumerate(loader), total=len(loader), smoothing=0.9):
+    for batch_id, (points, target) in enumerate(loader):
         batchsize, num_point, _ = points.size()
         points, target = Variable(points.float()), Variable(target.long())
         points = points.transpose(2, 1)
-        points, target = points.cuda(), target.cuda()
+        if torch.cuda.is_available():
+            points, target = points.cuda(), target.cuda()
+        else:
+            pass
         if pointnet2:
             pred = model(points[:, :3, :], points[:, 3:, :])
         else:
@@ -226,4 +230,113 @@ def show_point_cloud(tuple,seg_label=[],title=None):
         ax.set_ylabel('Y')
         ax.set_xlabel('X')
     plt.title(title)
+    plt.show()
+
+
+def calc_acc(pred,label):
+    '''
+    :param pred: shape=[batch_size,n_point] ,numpy
+    :param label:
+    :return:
+    '''
+    total_acc = 0
+    for i in range(np.shape(pred)[0]):
+        total_acc += np.sum([pred[i]==label[i]]) / np.shape(pred)[1]
+
+    return total_acc / np.shape(pred)[0]
+
+
+def calc_iou(pred,label):
+    '''
+    计算一个batch里面的iou和acc，所以return的数据为整个batch 的mean data
+    若 iou=1，说明label不存在这个class,且pred也没有这个class。
+    若 iou=0，说明label存在该class，但pred没有class
+    :param pred:
+    :param label:
+    :return:
+    '''
+    CLASS_LABELS = ['wall', 'floor', 'cabinet', 'bed', 'chair', 'sofa', 'table', 'door', 'window', 'bookshelf',
+                    'picture', 'counter', 'desk', 'curtain', 'refrigerator', 'shower curtain', 'toilet', 'sink',
+                    'bathtub', 'otherfurniture']
+    assert 20 == len(CLASS_LABELS), "wrong n_class"
+
+    batch_size = pred.shape[0]  # shape=[batchsize,n_point]
+    n_point = pred.shape[1]
+    n_class = 20
+
+    cat_table = np.zeros((2,n_class))  # cat_table.shape=[n_class,3]  cat_table[x][0-2]: acc,currency iou,miou
+
+
+    for i in range(batch_size):
+        # per batch
+        for cls in range(n_class):
+            # per class
+            acc_m1 = np.zeros(n_point)
+            acc_m2 = np.zeros(n_point)-1
+            I = np.sum(np.logical_and(pred[i] == cls, label[i] == cls))
+            U = np.sum(np.logical_or(pred[i] == cls, label[i] == cls))
+            if U != 0:
+                iou = I / U
+            else: # label[i] == cls全为0，simple中没有这个class
+                iou = 1
+            cat_table[1][cls] += iou
+
+            acc_m1[pred[i] == cls] = 1
+            acc_m2[label[i] == cls] = 1
+
+            if np.sum(label[i] == cls) == 0:
+                # 某些 图的point中不包含某些class，需要把这些class的准确率设为1
+                if np.sum([pred[i] == cls]) == 0:
+                    cat_table[0][cls] += 1  # 如果pred没有该class，且label没有该class，则acc=1
+                else:
+                    cat_table[0][cls] += 1  # label没有该class，但pred有，则acc = ?
+            else:
+                cat_table[0][cls] += np.sum(acc_m1 == acc_m2) / np.sum(label[i] == cls)
+
+    cat_table[1] = cat_table[1] / batch_size
+    cat_table[0] = cat_table[0] / batch_size
+
+    return cat_table
+
+def visualizer(points, pred, labels):
+    """
+    :param points: # shape = (4096,9)  data_batch[2,:,:]
+    :param labels:   label_batch[2,:]
+    :return:
+    """
+    CLASS_LABELS = ['wall', 'floor', 'cabinet', 'bed', 'chair', 'sofa', 'table', 'door', 'window', 'bookshelf',
+                    'picture', 'counter', 'desk', 'curtain', 'refrigerator', 'shower curtain', 'toilet', 'sink',
+                    'bathtub', 'otherfurniture']
+
+    skip = 1  # Skip every n points
+
+    fig = plt.figure(dpi=200)
+    ax = fig.add_subplot(121, projection='3d')
+    point_range = range(0, points.shape[0], skip)  # skip points to prevent crash
+    ax.scatter(points[point_range, 0],  # x
+               points[point_range, 1],  # y
+               points[point_range, 2],  # z
+               c=labels[point_range],  # height data for color
+               cmap='Spectral',
+               alpha=1,
+               s=2,
+               marker=".")
+    ax.axis('scaled')  # {equal, scaled}
+
+    ax2 = fig.add_subplot(122,projection='3d')
+    ax2.scatter(points[point_range, 0],  # x
+               points[point_range, 1],  # y
+               points[point_range, 2],  # z
+               c=pred[point_range],  # height data for color
+               cmap='Spectral',
+               alpha=1,
+               s=2,
+               marker=".")
+    ax2.axis('scaled')
+
+    # show color bar
+    plt.figure(2)
+    range_cmap = [[i for i in range(len(CLASS_LABELS))]]
+    plt.imshow(range_cmap, cmap='Spectral')
+    plt.xticks(range_cmap[0], CLASS_LABELS, rotation=50)
     plt.show()
