@@ -11,6 +11,7 @@ import os
 
 from time import time
 
+
 # sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),'../model'))
 sys.path.append("..")
 import model.pointconv_util as pointconv_util
@@ -184,28 +185,30 @@ class PointNetSetAbstraction_PointConv(nn.Module):
         self.nsample = nsample
         self.mlp_convs = nn.ModuleList()  # 用于存储layer顺序的list
         self.mlp_bns = nn.ModuleList()
-        last_channel = in_channel
-        for out_channel in mlp:  # 生成mlp层[x1,x2,x3]
-            self.mlp_convs.append(
-                nn.Conv2d(last_channel, out_channel, 1))  # 用Conv2d来做FC，Conv2d(in_channels,out_channel,k_size)
-            self.mlp_bns.append(nn.BatchNorm2d(out_channel))
-            last_channel = out_channel
+        # last_channel = in_channel
+        # for out_channel in mlp:  # 生成mlp层[x1,x2,x3]
+        #     self.mlp_convs.append(
+        #         nn.Conv2d(last_channel, out_channel, 1))  # 用Conv2d来做FC，Conv2d(in_channels,out_channel,k_size)
+        #     self.mlp_bns.append(nn.BatchNorm2d(out_channel))
+        #     last_channel = out_channel
         self.group_all = group_all
         self.mlp = mlp
 
-        self.c_mid = 32
-        self.weight_net_hidden = nn.Conv2d(in_channels=3,out_channels=self.c_mid,kernel_size=(1,1))
-        self.weight_net_hidden_bn = nn.BatchNorm2d(self.c_mid)
+        # self.c_mid = 32
+        # self.weight_net_hidden = nn.Conv2d(in_channels=3,out_channels=self.c_mid,kernel_size=(1,1))
+        # self.weight_net_hidden_bn = nn.BatchNorm2d(self.c_mid)
+        #
+        # # mlp_inverse density scale = [16,1]
+        # self.nonlinear_transform_1 = nn.Conv2d(1,16,(1,1))
+        # self.nonlinear_transform_1_bn1 = nn.BatchNorm2d(16)
+        # self.nonlinear_transform_2 = nn.Conv2d(16,1,(1,1))
+        # self.nonlinear_transform_2_bn2 = nn.BatchNorm2d(1)
+        #
+        # # out put conv
+        # self.out_conv = nn.Conv2d(in_channel,out_channels=mlp[-1],kernel_size=(1,self.c_mid))
+        # self.out_bn = nn.BatchNorm2d(mlp[-1])
 
-        # mlp_inverse density scale = [16,1]
-        self.nonlinear_transform_1 = nn.Conv2d(1,16,(1,1))
-        self.nonlinear_transform_1_bn1 = nn.BatchNorm2d(16)
-        self.nonlinear_transform_2 = nn.Conv2d(16,1,(1,1))
-        self.nonlinear_transform_2_bn2 = nn.BatchNorm2d(1)
-
-        # out put conv
-        self.out_conv = nn.Conv2d(in_channel,out_channels=mlp[-1],kernel_size=(1,self.c_mid))
-        self.out_bn = nn.BatchNorm2d(mlp[-1])
+        self.pointconv = pointconv_util.pointconv(in_channels=in_channel,out_channels=mlp[-1])
 
     def forward(self, xyz, points):
         """
@@ -216,20 +219,20 @@ class PointNetSetAbstraction_PointConv(nn.Module):
             new_xyz: sampled points position data, [B, C, S]
             new_points_concat: sample points feature data, [B, D', S]
         """
-        xyz = xyz.permute(0, 2, 1)
-        if points is not None:
-            points = points.permute(0, 2, 1)
-        grouped_xyz = 0
-        if self.group_all:  # PointNet2SemSeg 里面全是False
-            new_xyz, new_points = sample_and_group_all(xyz, points)
-            #         new_xyz: sampled points position data, [B, 1, C]
-            #         new_points: sampled points data, [B, 1, N, C+D]
-        else:
-            new_xyz, new_points, grouped_xyz, fps_idx = sample_and_group(self.npoint, self.radius, self.nsample, xyz, points,returnfps=True)
-        #         new_xyz: sampled points position data, [B, npoint, C]
-        #         new_points: sampled points data, [B, npoint, n_simple, C+D]
-        new_points = new_points.permute(0, 3, 2, 1)  # [B, C+D, nsample,npoint]
-        # # 下面这个是每个set abstraction block的pointnet layer
+        # xyz = xyz.permute(0, 2, 1)
+        # if points is not None:
+        #     points = points.permute(0, 2, 1)
+        # grouped_xyz = 0
+        # if self.group_all:  # PointNet2SemSeg 里面全是False
+        #     new_xyz, new_points = sample_and_group_all(xyz, points)
+        #     #         new_xyz: sampled points position data, [B, 1, C]
+        #     #         new_points: sampled points data, [B, 1, N, C+D]
+        # else:
+        #     new_xyz, new_points, grouped_xyz, fps_idx = sample_and_group(self.npoint, self.radius, self.nsample, xyz, points,returnfps=True)
+        # #         new_xyz: sampled points position data, [B, npoint, C]
+        # #         new_points: sampled points data, [B, npoint, n_simple, C+D]
+        # new_points = new_points.permute(0, 3, 2, 1)  # [B, C+D, nsample,npoint]
+        # # # 下面这个是每个set abstraction block的pointnet layer
 
         # [8,9,32,1024]  9=in_channel
         # for i, conv in enumerate(self.mlp_convs):
@@ -244,49 +247,9 @@ class PointNetSetAbstraction_PointConv(nn.Module):
         # new_points = [batch_size, channel(in_channel), nsample, npoint]
         # grouped_xyz = [8, 1024, 32, 3]
 
-        grouped_feature = new_points
-        grouped_feature[grouped_feature < 1e-10] = 1e-10
-
-        # density [batch,npoint,nsample,1]
-        density = pointconv_util.kernel_density_estimation_ball(grouped_xyz)# KDE! INPUT:xyz[B,3,npoint](算每个
-        density[density < 1e-10] = 1e-10
-        inverse_density = torch.div(1.,density)  # div
-        # grouped_density = torch.gather(inverse_density, 0,idx) # (batch_size, npoint, nsample, 1)  tf.gather_nd
-
-        inverse_max_density = torch.max(inverse_density, dim = 2, keepdim = True)[0]  # tf.reduce_max
-        density_scale = torch.div(inverse_density, inverse_max_density)  # density_scale = [8, 1024, 32, 1]
-
-
-        # weight = pointconv_util.weight_net_hidden(grouped_xyz, [32], scope = 'decode_weight_net', is_training=is_training, bn_decay = bn_decay, weight_decay = weight_decay)
-        grouped_xyz = torch.Tensor.permute(grouped_xyz,[0,3,1,2])  # [B,npoint,nsample,3] => [B,3,npoint,nsample]
-        weight = F.relu(self.weight_net_hidden_bn(self.weight_net_hidden(grouped_xyz)))  #weight [8, 32, 1024, 32]
-
-        density_scale = torch.Tensor.permute(density_scale,[0,3,1,2])
-        density_scale1 = F.relu(self.nonlinear_transform_1_bn1(self.nonlinear_transform_1(density_scale)))
-        density_scale = torch.sigmoid(self.nonlinear_transform_2_bn2(self.nonlinear_transform_2(density_scale1)))
-
-        # density_scale = [8, 1, 1024, 32]
-        # grouped_feature = [8, 9, 32, 1024]
-        grouped_feature = torch.Tensor.permute(grouped_feature,[0,1,3,2])
-        new_points = torch.mul(grouped_feature, density_scale)  # 用广播机制代替tile
-
-        # new_points = [8, 9, 1024, nsample]
-        new_points = torch.Tensor.permute(new_points, [0, 2, 1, 3]) # [8,1024,9,32]
-        # weight [8, 32, 1024, nsample]
-        weight = torch.Tensor.permute(weight,[0,2,3,1])
-
-        new_points = torch.matmul(new_points, weight)  # 结果为  C_in * C_mid
-
-        # new_points = [8, 1024, 9, c_mid]
-        new_points = torch.Tensor.permute(new_points,[0,2,1,3])
-
-        new_points = self.out_bn(self.out_conv(new_points))
-
-        # new_points = [8, 64, 1024, 1]
-        new_points = torch.squeeze(new_points,dim=-1)
-
-        new_xyz = torch.Tensor.permute(new_xyz,[0,2,1])
-
+        # grouped_feature = new_points
+        # new_xyz, new_points = self.pointconv(new_xyz, grouped_xyz, grouped_feature)
+        new_xyz,new_points = self.pointconv(xyz,points,self.npoint,self.radius,self.nsample)
         # new_xyz = [batch_size, channel(3), npoint]
         # new_points= [batch_size, channel(mlp[-1]), npoint(质心数)
         return new_xyz, new_points
@@ -400,6 +363,68 @@ class PointNetSetAbstractionMsg(nn.Module):
         new_xyz = new_xyz.permute(0, 2, 1)
         new_points_concat = torch.cat(new_points_list, dim=1)
         return new_xyz, new_points_concat
+
+
+class PointNetFeaturePropagation_PointConv(nn.Module):
+    def __init__(self, in_channel, mlp,npoint,radius,nsample):
+        super(PointNetFeaturePropagation_PointConv, self).__init__()
+        self.mlp_convs = nn.ModuleList()
+        self.mlp_bns = nn.ModuleList()
+        # last_channel = in_channel
+        # for out_channel in mlp:
+        #     self.mlp_convs.append(nn.Conv1d(last_channel, out_channel, 1))
+        #     self.mlp_bns.append(nn.BatchNorm1d(out_channel))
+        #     last_channel = out_channel
+        self.depointconv = pointconv_util.depointconv(in_channel,mlp[-1])
+        self.npoint = npoint
+        self.radius = radius
+        self.nsample = nsample
+
+    def forward(self, xyz1, xyz2, points1, points2):
+        """
+        Input:
+            xyz1: input points position data, [B, C, N]  # layer 3 的输出
+            xyz2: sampled input points position data, [B, C, S]  # layer 4 的输出
+            points1: input points data, [B, D, N]
+            points2: input points data, [B, D, S]
+        Return:
+            new_points: upsampled points data, [B, D', N]
+        """
+        xyz1 = xyz1.permute(0, 2, 1)
+        xyz2 = xyz2.permute(0, 2, 1)
+
+        points2 = points2.permute(0, 2, 1)
+        B, N, C = xyz1.shape
+        _, S, _ = xyz2.shape
+        if S == 1:
+            print("????????")
+            interpolated_points = points2.repeat(1, N, 1)
+        else:
+            # 一种拼接 方法？？？？？
+            dists = square_distance(xyz1, xyz2)
+            dists, idx = dists.sort(dim=-1)
+            dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]
+            dists[dists < 1e-10] = 1e-10
+            weight = 1.0 / dists  # [B, N, 3]
+            weight = weight / torch.sum(weight, dim=-1).view(B, N, 1)  # [B, N, 3]
+            interpolated_points = torch.sum(index_points(points2, idx) * weight.view(B, N, 3, 1), dim=2)
+        if points1 is not None:
+            points1 = points1.permute(0, 2, 1)
+            new_points = torch.cat([points1, interpolated_points], dim=-1)
+        else:
+            new_points = interpolated_points
+
+        new_points = new_points.permute(0, 2, 1)
+        # print(new_points.shape)  [1, 768, 64] == [B,in_channel,layer3和layer4里面最大npoint（这个算法是xyz1的最大）]
+        # print(xyz1.shape)  [1, 64, 3]
+        # print(xyz2.shape)  [1, 16, 3]
+
+        # for i, conv in enumerate(self.mlp_convs):
+        #     bn = self.mlp_bns[i]
+        #     new_points =  F.relu(bn(conv(new_points)))
+        xyz1 = xyz1.permute(0, 2, 1)  # [B,C, N]
+        new_points = self.depointconv(xyz1, new_points,self.npoint,self.radius,self.nsample)
+        return new_points
 
 # fp,upsample
 class PointNetFeaturePropagation(nn.Module):

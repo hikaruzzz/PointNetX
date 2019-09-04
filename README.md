@@ -1,0 +1,2 @@
+# PointNetX
+* The backbone is [PointNet++](http://stanford.edu/~rqi/pointnet2/). After the step of sampling the local region, using the [PointConv](https://arxiv.org/abs/1811.07246v1) to instead the mlp layer(in PointNet++ model here will be PointNet).

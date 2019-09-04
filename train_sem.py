@@ -30,6 +30,7 @@ np.random.seed(1280)
 
 
 def train():
+    assert max_point == 8192,"wrong max point,need to change pointnet_util->fp1 = PointNetFeaturePropagation_PointConv->in_channel"
     # read device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("device: {}".format(device),end="\n")
@@ -61,7 +62,7 @@ def train():
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=40, gamma=0.5)
 
     # criterion
-    criterion = torch.nn.BCEWithLogitsLoss()
+    #criterion = torch.nn.BCEWithLogitsLoss()
     #criterion = F.nll_loss()
 
     # load checkpoints
@@ -101,8 +102,10 @@ def train():
             # targets = targets.view(-1, 1)[:, 0]
             targets = targets.contiguous().view(-1)
 
-            #loss = F.cross_entropy(input=pred,target=targets) # log_softmax + nll_loss
-            loss = F.nll_loss(pred, targets)  # softmax + Cross-Entropy cost
+
+            #loss = criterion(pred.float(),targets.float())
+            loss = F.cross_entropy(input=pred,target=targets) # log_softmax + nll_loss
+            # loss = F.nll_loss(pred, targets)  # softmax + Cross-Entropy cost
 
             cur_loss = np.float(loss.cpu().detach().numpy()) # 不要用.data,会导致tensor flag: requires_grad=False,终止求导
 

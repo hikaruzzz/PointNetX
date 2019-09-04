@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 from model.pointnet_util import PointNetSetAbstractionMsg,PointNetSetAbstraction,PointNetFeaturePropagation
-from model.pointnet_util import PointNetSetAbstraction_PointConv
+from model.pointnet_util import PointNetSetAbstraction_PointConv,PointNetFeaturePropagation_PointConv
 
 class PointNet2ClsMsg(nn.Module):
     def __init__(self):
@@ -169,14 +169,21 @@ class PointNet2SemSeg_PointConv(nn.Module):
     def __init__(self, num_classes):
         super(PointNet2SemSeg_PointConv, self).__init__()
         # npoint, radius, nsample, in_channel, mlp, group_all
-        self.sa1 = PointNetSetAbstraction_PointConv(1024, 0.1, 32, 6 + 3, [32, 32, 64], False)
-        self.sa2 = PointNetSetAbstraction_PointConv(256, 0.2, 32, 64 + 3, [64, 64, 128], False)
-        self.sa3 = PointNetSetAbstraction_PointConv(64, 0.4, 32, 128 + 3, [128, 128, 256], False)
-        self.sa4 = PointNetSetAbstraction_PointConv(16, 0.8, 32, 256 + 3, [256, 256, 512], False)
-        self.fp4 = PointNetFeaturePropagation(768, [256, 256])
-        self.fp3 = PointNetFeaturePropagation(384, [256, 256])
-        self.fp2 = PointNetFeaturePropagation(320, [256, 128])
-        self.fp1 = PointNetFeaturePropagation(128, [128, 128, 128])
+        # 这里的 inchannel是指point feature的，已经去掉sample&group函数中的concatenate xyz了。
+        self.sa1 = PointNetSetAbstraction_PointConv(1024, 0.1, 32, 6, [32, 32, 64], False)
+        self.sa2 = PointNetSetAbstraction_PointConv(256, 0.2, 32, 64, [64, 64, 128], False)
+        self.sa3 = PointNetSetAbstraction_PointConv(64, 0.4, 32, 128, [128, 128, 256], False)
+        self.sa4 = PointNetSetAbstraction_PointConv(16, 0.8, 32, 256, [256, 256, 512], False)
+
+        # 这个6+3，是指point feature的channel是6+3，明明是RGB+local的，还concatenate xyz？？？
+        # self.sa1 = PointNetSetAbstraction_PointConv(1024, 0.1, 32, 6 + 3, [32, 32, 64], False)
+        # self.sa2 = PointNetSetAbstraction_PointConv(256, 0.2, 32, 64 + 3, [64, 64, 128], False)
+        # self.sa3 = PointNetSetAbstraction_PointConv(64, 0.4, 32, 128 + 3, [128, 128, 256], False)
+        # self.sa4 = PointNetSetAbstraction_PointConv(16, 0.8, 32, 256 + 3, [256, 256, 512], False)
+        self.fp4 = PointNetFeaturePropagation_PointConv(768, [256, 256], 64, 0.4, 32)  # 768 = s4的512output + s3的256output channel
+        self.fp3 = PointNetFeaturePropagation_PointConv(384, [256, 256], 256, 0.2, 32)   # 后面三个是跟随对应skip sa中最大npoint那个的采样值
+        self.fp2 = PointNetFeaturePropagation_PointConv(320, [256, 128], 1024, 0.1, 32)
+        self.fp1 = PointNetFeaturePropagation_PointConv(128, [128, 128, 128], 8192, 0.05, 32)
         self.conv1 = nn.Conv1d(128, 128, 1)  # in_channels, out_channels, kernel_size
         self.bn1 = nn.BatchNorm1d(128)
         self.drop1 = nn.Dropout(0.5)

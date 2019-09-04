@@ -1,9 +1,9 @@
 # paras
-n_workers = 1
-batch_size = 1
+n_workers = 2
+batch_size = 4
 max_epoch = 51
 
-lr = 0.0001
+lr = 0.001
 decay_rate = 1e-4
 optimizer_name = 'adam'
 scannet_file_root = r'C:\Users\PC\Desktop\scannet'
